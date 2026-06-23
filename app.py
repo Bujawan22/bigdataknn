@@ -119,6 +119,13 @@ def inject_style():
                 background: #fef2f2;
             }
 
+            .prediction-confidence {
+                margin: 8px 0 0 0;
+                color: #52657d;
+                font-size: 14px;
+                font-weight: 600;
+            }
+
             div[data-testid="stMetric"] {
                 background: #ffffff;
                 border: 1px solid var(--border);
@@ -323,21 +330,46 @@ def build_default_values(df, mode):
     return row
 
 
+def build_label_sample(df, label):
+    sample_df = df[df["label"] == label]
+    if sample_df.empty:
+        return df.sample(1, random_state=None).iloc[0].to_dict()
+    return sample_df.sample(1, random_state=None).iloc[0].to_dict()
+
+
+def apply_sample_to_widgets(sample, metadata):
+    st.session_state.sample_values = sample
+    for column in [*metadata["categorical_cols"], *metadata["numeric_cols"]]:
+        if column in sample:
+            st.session_state[column] = sample[column]
+
+
 def render_input_form(metadata, df):
     input_mode = st.radio(
         "Mode Input",
         ["Auto dari Dataset", "Manual"],
         horizontal=True,
+        key="input_mode",
     )
 
-    if "sample_values" not in st.session_state or st.button("Ambil Sample Baru"):
-        st.session_state.sample_values = build_default_values(df, input_mode)
+    action_cols = st.columns(3)
+    with action_cols[0]:
+        if st.button("Contoh Normal", use_container_width=True):
+            apply_sample_to_widgets(build_label_sample(df, 0), metadata)
+    with action_cols[1]:
+        if st.button("Contoh DDoS", use_container_width=True):
+            apply_sample_to_widgets(build_label_sample(df, 1), metadata)
+    with action_cols[2]:
+        if st.button("Acak Dataset", use_container_width=True):
+            apply_sample_to_widgets(build_default_values(df, "Auto dari Dataset"), metadata)
+
+    if "sample_values" not in st.session_state:
+        apply_sample_to_widgets(build_default_values(df, input_mode), metadata)
 
     if input_mode == "Manual":
         values = st.session_state.sample_values.copy()
     else:
-        values = build_default_values(df, input_mode)
-        st.session_state.sample_values = values
+        values = st.session_state.sample_values.copy()
 
     categorical_cols = metadata["categorical_cols"]
     numeric_cols = metadata["numeric_cols"]
@@ -346,13 +378,19 @@ def render_input_form(metadata, df):
     id_cols = st.columns(3)
     with id_cols[0]:
         src_options = sorted(df["src"].dropna().unique().tolist())
-        values["src"] = st.selectbox("Source IP", src_options, index=src_options.index(values.get("src", src_options[0])) if values.get("src") in src_options else 0)
+        if st.session_state.get("src") not in src_options:
+            st.session_state["src"] = values.get("src", src_options[0])
+        values["src"] = st.selectbox("Source IP", src_options, key="src")
     with id_cols[1]:
         dst_options = sorted(df["dst"].dropna().unique().tolist())
-        values["dst"] = st.selectbox("Destination IP", dst_options, index=dst_options.index(values.get("dst", dst_options[0])) if values.get("dst") in dst_options else 0)
+        if st.session_state.get("dst") not in dst_options:
+            st.session_state["dst"] = values.get("dst", dst_options[0])
+        values["dst"] = st.selectbox("Destination IP", dst_options, key="dst")
     with id_cols[2]:
         protocol_options = sorted(df["Protocol"].dropna().unique().tolist())
-        values["Protocol"] = st.selectbox("Protocol", protocol_options, index=protocol_options.index(values.get("Protocol", protocol_options[0])) if values.get("Protocol") in protocol_options else 0)
+        if st.session_state.get("Protocol") not in protocol_options:
+            st.session_state["Protocol"] = values.get("Protocol", protocol_options[0])
+        values["Protocol"] = st.selectbox("Protocol", protocol_options, key="Protocol")
 
     st.markdown('<div class="section-title">Fitur Numerik</div>', unsafe_allow_html=True)
     for group_start in range(0, len(numeric_cols), 3):
@@ -362,14 +400,16 @@ def render_input_form(metadata, df):
             max_value = float(df[feature].max())
             current = float(values.get(feature, df[feature].median()))
             step = max((max_value - min_value) / 1000, 1.0)
+            if feature not in st.session_state:
+                st.session_state[feature] = max(min(current, max_value), min_value)
             with col:
                 values[feature] = st.number_input(
                     feature,
                     min_value=min_value,
                     max_value=max_value,
-                    value=max(min(current, max_value), min_value),
                     step=step,
                     format="%.4f",
+                    key=feature,
                 )
 
     return {col: values[col] for col in [*categorical_cols, *numeric_cols]}
@@ -438,12 +478,13 @@ def prediction_page(metadata, df):
             status.empty()
 
         result_class = label_class(predicted_label)
+        display_confidence = min(confidence * 100, 99.0)
         st.markdown(
             f"""
             <div class="prediction-box {result_class}">
                 <div class="metric-label">Hasil Prediksi</div>
                 <div class="metric-value">{label_name(predicted_label)}</div>
-                <p>Confidence voting KNN: <b>{confidence * 100:.1f}%</b></p>
+                <p class="prediction-confidence">Confidence: {display_confidence:.1f}%</p>
             </div>
             """,
             unsafe_allow_html=True,
