@@ -1,0 +1,6 @@
+pyspark>=3.3.0
+numpy
+matplotlib
+streamlit
+pandas
+pyarrow
