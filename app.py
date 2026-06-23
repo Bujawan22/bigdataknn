@@ -212,7 +212,7 @@ def metric_card(label, value):
 
 
 def label_name(label):
-    return "Attack / DDoS" if int(label) == 1 else "Normal"
+    return "Malicious Traffic" if int(label) == 1 else "Benign Traffic"
 
 
 def label_class(label):
@@ -224,7 +224,7 @@ def dashboard(metadata, df):
         """
         <div class="hero">
             <h1>DDoS SDN Detection</h1>
-            <p>Dashboard monitoring untuk model Spark LSH-KNN pada lalu lintas Software Defined Network.</p>
+            <p>Dashboard monitoring untuk model Spark LSH-KNN pada klasifikasi trafik Software Defined Network.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -245,15 +245,15 @@ def dashboard(metadata, df):
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Total Record", f"{len(df):,}")
     d2.metric("Jumlah Fitur Model", len(metadata["feature_cols"]))
-    d3.metric("Data Normal", f"{int((df['label'] == 0).sum()):,}")
-    d4.metric("Data Attack", f"{int((df['label'] == 1).sum()):,}")
+    d3.metric("Data Benign", f"{int((df['label'] == 0).sum()):,}")
+    d4.metric("Data Malicious", f"{int((df['label'] == 1).sum()):,}")
 
     left, right = st.columns([1.15, 1])
     with left:
         st.markdown('<div class="section-title">Distribusi Label</div>', unsafe_allow_html=True)
         label_counts = (
             df["label"]
-            .map({0: "Normal", 1: "Attack / DDoS"})
+            .map({0: "Benign", 1: "Malicious"})
             .value_counts()
             .rename_axis("Label")
             .reset_index(name="Jumlah")
@@ -281,7 +281,7 @@ def dashboard(metadata, df):
     with chart_left:
         st.markdown('<div class="section-title">Protocol Berdasarkan Label</div>', unsafe_allow_html=True)
         protocol_summary = (
-            df.assign(label_name=df["label"].map({0: "Normal", 1: "Attack / DDoS"}))
+            df.assign(label_name=df["label"].map({0: "Benign", 1: "Malicious"}))
             .groupby(["Protocol", "label_name"])
             .size()
             .reset_index(name="Jumlah")
@@ -295,7 +295,7 @@ def dashboard(metadata, df):
         )
 
     with chart_right:
-        st.markdown('<div class="section-title">Top Source IP Attack</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Top Source IP Malicious</div>', unsafe_allow_html=True)
         top_attack_src = (
             df[df["label"] == 1]
             .groupby("src")
@@ -303,19 +303,19 @@ def dashboard(metadata, df):
             .sort_values(ascending=False)
             .head(10)
             .rename_axis("Source IP")
-            .reset_index(name="Jumlah Attack")
+            .reset_index(name="Jumlah Malicious")
         )
         st.bar_chart(
             top_attack_src,
             x="Source IP",
-            y="Jumlah Attack",
+            y="Jumlah Malicious",
             color="#1d4ed8",
             height=300,
         )
 
     st.markdown('<div class="section-title">Rata-Rata Trafik Berdasarkan Label</div>', unsafe_allow_html=True)
     traffic_cols = ["pktcount", "bytecount", "flows", "packetins", "pktrate", "tot_kbps"]
-    traffic_summary = df.groupby("label")[traffic_cols].mean().rename(index={0: "Normal", 1: "Attack / DDoS"})
+    traffic_summary = df.groupby("label")[traffic_cols].mean().rename(index={0: "Benign", 1: "Malicious"})
     st.dataframe(traffic_summary.round(2), use_container_width=True)
 
     st.markdown('<div class="section-title">Contoh Dataset</div>', unsafe_allow_html=True)
@@ -354,10 +354,10 @@ def render_input_form(metadata, df):
 
     action_cols = st.columns(3)
     with action_cols[0]:
-        if st.button("Contoh Normal", use_container_width=True):
+        if st.button("Contoh Benign", use_container_width=True):
             apply_sample_to_widgets(build_label_sample(df, 0), metadata)
     with action_cols[1]:
-        if st.button("Contoh DDoS", use_container_width=True):
+        if st.button("Contoh Malicious", use_container_width=True):
             apply_sample_to_widgets(build_label_sample(df, 1), metadata)
     with action_cols[2]:
         if st.button("Acak Dataset", use_container_width=True):
@@ -458,7 +458,7 @@ def prediction_page(metadata, df):
         """
         <div class="hero">
             <h1>Prediksi Trafik SDN</h1>
-            <p>Masukkan fitur trafik secara manual atau gunakan auto input dari dataset untuk memprediksi Normal atau Attack.</p>
+            <p>Masukkan fitur trafik secara manual atau gunakan auto input dari dataset untuk memprediksi Benign atau Malicious.</p>
         </div>
         """,
         unsafe_allow_html=True,
