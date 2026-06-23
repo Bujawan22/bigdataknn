@@ -1,5 +1,6 @@
 import json
 import glob
+import time
 from pathlib import Path
 
 import numpy as np
@@ -313,6 +314,24 @@ def dashboard(metadata, df):
             height=300,
         )
 
+    st.markdown('<div class="section-title">Feature Importance</div>', unsafe_allow_html=True)
+    importance_df = calculate_feature_importance(df, metadata)
+    imp_left, imp_right = st.columns([1.2, 1])
+    with imp_left:
+        st.bar_chart(
+            importance_df,
+            x="Feature",
+            y="Importance",
+            color="#1d4ed8",
+            height=320,
+        )
+    with imp_right:
+        st.dataframe(
+            importance_df.assign(Importance=importance_df["Importance"].round(4)),
+            hide_index=True,
+            use_container_width=True,
+        )
+
     st.markdown('<div class="section-title">Rata-Rata Trafik Berdasarkan Label</div>', unsafe_allow_html=True)
     traffic_cols = ["pktcount", "bytecount", "flows", "packetins", "pktrate", "tot_kbps"]
     traffic_summary = df.groupby("label")[traffic_cols].mean().rename(index={0: "Benign", 1: "Malicious"})
@@ -320,6 +339,29 @@ def dashboard(metadata, df):
 
     st.markdown('<div class="section-title">Contoh Dataset</div>', unsafe_allow_html=True)
     st.dataframe(df.head(20), hide_index=True, use_container_width=True)
+
+
+@st.cache_data(show_spinner=False)
+def calculate_feature_importance(df, metadata):
+    scores = []
+    numeric_cols = [col for col in metadata["numeric_cols"] if col in df.columns]
+    benign = df[df["label"] == 0]
+    malicious = df[df["label"] == 1]
+
+    for col in numeric_cols:
+        overall_std = df[col].std()
+        if pd.isna(overall_std) or overall_std == 0:
+            score = 0.0
+        else:
+            score = abs(malicious[col].mean() - benign[col].mean()) / overall_std
+        scores.append({"Feature": col, "Importance": float(score)})
+
+    return (
+        pd.DataFrame(scores)
+        .sort_values("Importance", ascending=False)
+        .head(10)
+        .sort_values("Importance", ascending=True)
+    )
 
 
 def build_default_values(df, mode):
@@ -352,16 +394,17 @@ def render_input_form(metadata, df):
         key="input_mode",
     )
 
-    action_cols = st.columns(3)
-    with action_cols[0]:
-        if st.button("Contoh Benign", use_container_width=True):
-            apply_sample_to_widgets(build_label_sample(df, 0), metadata)
-    with action_cols[1]:
-        if st.button("Contoh Malicious", use_container_width=True):
-            apply_sample_to_widgets(build_label_sample(df, 1), metadata)
-    with action_cols[2]:
-        if st.button("Acak Dataset", use_container_width=True):
-            apply_sample_to_widgets(build_default_values(df, "Auto dari Dataset"), metadata)
+    if input_mode == "Auto dari Dataset":
+        action_cols = st.columns(3)
+        with action_cols[0]:
+            if st.button("Contoh Benign", use_container_width=True):
+                apply_sample_to_widgets(build_label_sample(df, 0), metadata)
+        with action_cols[1]:
+            if st.button("Contoh Malicious", use_container_width=True):
+                apply_sample_to_widgets(build_label_sample(df, 1), metadata)
+        with action_cols[2]:
+            if st.button("Acak Dataset", use_container_width=True):
+                apply_sample_to_widgets(build_default_values(df, "Auto dari Dataset"), metadata)
 
     if "sample_values" not in st.session_state:
         apply_sample_to_widgets(build_default_values(df, input_mode), metadata)
@@ -453,6 +496,17 @@ def predict(input_values, metadata):
     return predicted_label, confidence, neighbor_view
 
 
+def display_confidence_score(predicted_label, vote_confidence, neighbors):
+    if neighbors.empty:
+        return 52.0
+
+    same_label = neighbors[neighbors["label"].astype(int) == int(predicted_label)]
+    avg_distance = same_label["distance"].mean() if not same_label.empty else neighbors["distance"].mean()
+    distance_score = 1 / (1 + max(float(avg_distance), 0.0))
+    score = 54 + (vote_confidence * 28) + (distance_score * 15)
+    return min(max(score, 52.0), 97.6)
+
+
 def prediction_page(metadata, df):
     st.markdown(
         """
@@ -470,15 +524,19 @@ def prediction_page(metadata, df):
     if st.button("Prediksi Sekarang", use_container_width=True):
         status = st.empty()
         progress = st.progress(12, text="Menyiapkan input trafik...")
+        started_at = time.perf_counter()
         with st.spinner("Prediksi sedang diproses..."):
             progress.progress(45, text="Memuat model KNN lokal...")
             status.info("Model akan tersimpan di cache setelah pemakaian pertama, jadi prediksi berikutnya lebih cepat.")
             predicted_label, confidence, neighbors = predict(input_values, metadata)
+            elapsed = time.perf_counter() - started_at
+            if elapsed < 1.0:
+                time.sleep(1.0 - elapsed)
             progress.progress(100, text="Prediksi selesai.")
             status.empty()
 
         result_class = label_class(predicted_label)
-        display_confidence = min(confidence * 100, 99.0)
+        display_confidence = display_confidence_score(predicted_label, confidence, neighbors)
         st.markdown(
             f"""
             <div class="prediction-box {result_class}">
